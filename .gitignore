@@ -1,0 +1,36 @@
+# Local environments and build output
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.DS_Store
+
+# Meeting content: keep generated artifacts under output/
+output/
+recordings/
+*.mp4
+*.mov
+*.mkv
+*.webm
+*.mp3
+*.m4a
+*.wav
+*.flac
+*.aac
+*.ogg
+*.aiff
+
+# Local credentials and agent configuration
+.env
+.env.*
+!.env.example
+.pi/
+*.pem
+*.key
+*.p12
+*.pfx
