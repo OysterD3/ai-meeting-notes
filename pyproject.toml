@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "ai-meeting-notes"
 version = "0.1.0"
-description = "Local MLX transcription and meeting notes through your existing Pi sign-in."
+description = "Local MLX transcription, meeting notes, and an infographic through your existing Pi or Claude Code sign-in."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]

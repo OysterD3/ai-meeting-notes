@@ -43,8 +43,19 @@ def _check_transcript_output(output_dir: Path) -> None:
 
 
 def _check_notes_output(path: Path) -> None:
-    if _artifact_exists(path):
-        raise CLIError(f"refusing to overwrite existing artifact: {path}")
+    from .notes import artifact_paths
+
+    for artifact in artifact_paths(path):
+        if _artifact_exists(artifact):
+            raise CLIError(f"refusing to overwrite existing artifact: {artifact}")
+
+
+def _notes_model(args: argparse.Namespace) -> str | None:
+    if args.engine == "claude" and args.pi_model:
+        raise CLIError("--pi-model only applies to --engine pi")
+    if args.engine == "pi" and args.claude_model:
+        raise CLIError("--claude-model only applies to --engine claude")
+    return args.pi_model or args.claude_model
 
 
 def _transcribe(recording: Path, output_dir: Path, model: str | None, language: str | None) -> Path:
@@ -62,16 +73,22 @@ def _transcribe(recording: Path, output_dir: Path, model: str | None, language: 
     return transcript
 
 
-def _notes(transcript: Path, output: Path, model: str | None) -> Path:
-    print(f"Generating notes from {transcript}...", file=sys.stderr)
-    from .notes import generate_notes
+def _notes(transcript: Path, output: Path, engine: str, model: str | None) -> Path:
+    print(f"Generating notes from {transcript} with {engine}...", file=sys.stderr)
+    from .notes import artifact_paths, generate_notes
 
-    options: dict[str, str] = {}
-    if model:
-        options["model"] = model
-    notes = generate_notes(transcript, output, **options)
+    notes = generate_notes(transcript, output, engine=engine, model=model)
+    _, html, png = artifact_paths(notes)
     print(f"Notes: {notes}")
+    print(f"Infographic HTML: {html}")
+    print(f"Infographic PNG: {png}")
     return notes
+
+
+def _add_notes_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--engine", choices=("pi", "claude"), default="pi", help="notes engine (default: pi)")
+    parser.add_argument("--pi-model", dest="pi_model", metavar="PROVIDER/MODEL")
+    parser.add_argument("--claude-model", dest="claude_model", metavar="MODEL")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -84,17 +101,17 @@ def _parser() -> argparse.ArgumentParser:
     transcribe.add_argument("--model", metavar="HF_ASR_ID")
     transcribe.add_argument("--language", metavar="CODE")
 
-    notes = commands.add_parser("notes", help="create notes from a transcript JSON file")
+    notes = commands.add_parser("notes", help="create notes and an infographic from a transcript JSON file")
     notes.add_argument("transcript", metavar="TRANSCRIPT_JSON")
     notes.add_argument("--output", metavar="FILE")
-    notes.add_argument("--pi-model", dest="pi_model", metavar="PROVIDER/MODEL")
+    _add_notes_options(notes)
 
     run = commands.add_parser("run", help="transcribe, then create notes")
     run.add_argument("recording", metavar="RECORDING")
     run.add_argument("--output", metavar="DIR")
     run.add_argument("--model", metavar="HF_ASR_ID")
     run.add_argument("--language", metavar="CODE")
-    run.add_argument("--pi-model", dest="pi_model", metavar="PROVIDER/MODEL")
+    _add_notes_options(run)
     return parser
 
 
@@ -109,17 +126,22 @@ def _run(args: argparse.Namespace) -> int:
     if args.command == "notes":
         transcript = _transcript_path(args.transcript)
         output = Path(args.output).expanduser().resolve() if args.output else transcript.with_name("notes.md")
+        model = _notes_model(args)
         _check_notes_output(output)
-        _notes(transcript, output, args.pi_model)
+        _notes(transcript, output, args.engine, model)
         return 0
 
     recording = _recording_path(args.recording)
     output_dir = _output_dir(recording, args.output)
     notes_output = output_dir / "notes.md"
+    model = _notes_model(args)
     _check_transcript_output(output_dir)
     _check_notes_output(notes_output)
+    from .notes import preflight
+
+    preflight(args.engine)
     transcript = _transcribe(recording, output_dir, args.model, args.language)
-    _notes(transcript, notes_output, args.pi_model)
+    _notes(transcript, notes_output, args.engine, model)
     return 0
 
 

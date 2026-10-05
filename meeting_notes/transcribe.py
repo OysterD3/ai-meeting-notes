@@ -65,6 +65,46 @@ def transcribe(
     return transcript_json
 
 
+_CHUNK_SECONDS = 28
+_CHUNK_PADDING_SECONDS = 0.2
+
+
+def retranscribe(
+    recording: Path, *, model: str, language: str, initial_prompt: str, segments: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Transcribe *recording* again with a vocabulary prompt and return its spoken segments.
+
+    MLX Whisper uses the initial prompt only for its first 30-second window, so the audio is
+    transcribed in chunks of at most 28 seconds. Chunks are cut between the given segments.
+    """
+    with tempfile.TemporaryDirectory(prefix="meeting-notes-") as temporary_dir:
+        decoded = Path(temporary_dir) / "audio.wav"
+        _decode(Path(recording), decoded)
+        audio, duration = _read_audio(decoded)
+
+    chunks: list[list[float]] = []
+    for segment in segments:
+        if chunks and segment["end"] - chunks[-1][0] <= _CHUNK_SECONDS:
+            chunks[-1][1] = segment["end"]
+        else:
+            chunks.append([segment["start"], segment["end"]])
+
+    result_segments: list[dict[str, Any]] = []
+    for start, end in chunks:
+        start = max(0.0, start - _CHUNK_PADDING_SECONDS)
+        end = min(duration, end + _CHUNK_PADDING_SECONDS)
+        clip = audio[int(start * 16000) : int(end * 16000)]
+        if not len(clip):
+            continue
+        _, _, clip_segments = _normalise_result(_run_mlx(clip, model, language, initial_prompt))
+        result_segments.extend(
+            {"start": start + item["start"], "end": start + item["end"], "text": item["text"]}
+            for item in clip_segments
+            if item["text"].strip()
+        )
+    return result_segments
+
+
 def _refuse_existing(*paths: Path) -> None:
     existing = [str(path) for path in paths if path.exists()]
     if existing:
@@ -128,7 +168,9 @@ def _read_audio(decoded: Path) -> tuple[Any, float]:
     return waveform, frame_count / 16000
 
 
-def _run_mlx(audio: Any, model: str, language: str | None) -> dict[str, Any]:
+def _run_mlx(
+    audio: Any, model: str, language: str | None, initial_prompt: str | None = None
+) -> dict[str, Any]:
     try:
         from mlx_whisper import transcribe as mlx_transcribe
     except ImportError as error:
@@ -143,6 +185,7 @@ def _run_mlx(audio: Any, model: str, language: str | None) -> dict[str, Any]:
             verbose=False,
             word_timestamps=True,
             condition_on_previous_text=False,
+            initial_prompt=initial_prompt,
         )
     except Exception as error:
         raise TranscriptionError(f"MLX Whisper transcription failed: {error}") from error
